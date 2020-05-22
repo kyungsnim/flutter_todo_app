@@ -1,4 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+class Todo {
+  bool isDone; // 현재 진행여부
+  String title; // 할일
+
+  Todo(this.title, {this.isDone = false});
+}
 
 void main() {
   runApp(MyApp());
@@ -9,97 +17,111 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'ToDo App',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
+        primarySwatch: Colors.green,
       ),
-      home: MyHomePage(title: 'Flutter Demo Home Page'),
+      home: ToDoListPage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  MyHomePage({Key key, this.title}) : super(key: key);
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
+class ToDoListPage extends StatefulWidget {
   @override
-  _MyHomePageState createState() => _MyHomePageState();
+  _ToDoListPageState createState() => _ToDoListPageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _ToDoListPageState extends State<ToDoListPage> {
+  // 할일 문자열 다룰 컨트롤러
+  var _todoController = TextEditingController();
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  @override
+  void dispose() {
+    _todoController.dispose(); // 컨트롤러는 종료시 반드시 해제해줘야 함
+    super.dispose();
+  }
+
+  Widget _buildItemWidget(DocumentSnapshot doc) { // DocumentSnapshot 추가
+    // title은 생성시 필수값, isDone은 옵셔널
+    final todo = Todo(doc['title'], isDone: doc['isDone']);
+
+    return ListTile(
+      onTap: () => _toggleTodo(doc), // 완료/미완료 상태변경
+      trailing: IconButton(
+        icon: Icon(Icons.delete),
+        onPressed: () => _deleteTodo(doc), // 할일 삭제하기
+      ),
+      title: Text(
+        todo.title,
+        style: todo.isDone? // 할일 완료 여부로 스타일 변경
+          TextStyle(
+            decoration: TextDecoration.lineThrough, // 취소선
+            fontStyle: FontStyle.italic, // 이탤릭체
+          ) : null, // 할일 중이면 아무 작업 안함
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: Text('남은 할 일'),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
+      body: Padding(
+        padding: const EdgeInsets.all(8.0),
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Invoke "debug painting" (press "p" in the console, choose the
-          // "Toggle Debug Paint" action from the Flutter Inspector in Android
-          // Studio, or the "Toggle Debug Paint" command in Visual Studio Code)
-          // to see the wireframe for each widget.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            Text(
-              'You have pushed the button this many times:',
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: TextField(
+                    controller: _todoController,
+                  ),
+                ),
+                RaisedButton(
+                  onPressed: () => _addTodo(Todo(_todoController.text)),
+                  color: Colors.green,
+                  child: Text('추가하기', style: TextStyle(color: Colors.white),),
+                )
+              ],
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headline4,
-            ),
+            StreamBuilder<QuerySnapshot>(
+              stream: Firestore.instance.collection('todo').snapshots(), // 1
+              builder: (context, snapshot) { // 2
+                if(!snapshot.hasData) { // 3
+                  return CircularProgressIndicator();
+                }
+                final documents = snapshot.data.documents; // 4
+                return Expanded(
+                  child: ListView(
+                    children: documents.map((doc) => _buildItemWidget(doc)).toList(), // 5
+                  ),
+                );
+              }
+            )
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
+  }
+
+  // 할 일 추가 메소드
+  void _addTodo(Todo todo) {
+    Firestore.instance
+      .collection('todo')
+      .add({'title': todo.title, 'isDone': todo.isDone});
+      _todoController.text = ''; // 할일을 리스트에 추가하며 할일 입력 필드 비우기
+  }
+
+  // 할 일 삭제 메소드
+  void _deleteTodo(DocumentSnapshot doc) {
+    Firestore.instance.collection('todo').document(doc.documentID).delete();
+  }
+
+  // 할 일 완료/미완료 메소드
+  void _toggleTodo(DocumentSnapshot doc) {
+    Firestore.instance
+      .collection('todo').document(doc.documentID).updateData({'isDone': !doc['isDone']});
   }
 }
